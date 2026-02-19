@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+conch.log
+conch.log.*
+track_state.txt
+track_state.txt.tmp
