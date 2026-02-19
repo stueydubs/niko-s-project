@@ -11,6 +11,7 @@ import select
 import signal
 import random
 import logging
+import threading
 import subprocess
 import atexit
 from logging.handlers import RotatingFileHandler
@@ -136,13 +137,31 @@ def cleanup_gpio():
         pass
 
 
+def _keyboard_thread():
+    global button_pressed
+    while True:
+        try:
+            line = input()
+            if line.strip() == "" or " " in line or line.strip().lower() == "space":
+                button_pressed = True
+        except EOFError:
+            break
+
+
 def setup_keyboard():
-    if not sys.stdin.isatty():
-        return None
-    import tty, termios
-    old_settings = termios.tcgetattr(sys.stdin)
-    tty.setcbreak(sys.stdin.fileno())
-    return old_settings
+    if sys.stdin.isatty():
+        # Real terminal: use raw mode for instant spacebar detection
+        try:
+            import tty, termios
+            old_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno())
+            return old_settings
+        except Exception:
+            pass
+    # Fallback (Thonny, etc): use background thread reading input()
+    t = threading.Thread(target=_keyboard_thread, daemon=True)
+    t.start()
+    return "thread"
 
 
 def check_keyboard():
@@ -159,7 +178,7 @@ def check_keyboard():
 
 
 def cleanup_keyboard(old_settings):
-    if old_settings is not None:
+    if old_settings is not None and old_settings != "thread":
         import termios
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
@@ -209,7 +228,9 @@ def main():
         log.warning("GPIO not available, using keyboard input only")
 
     old_term = setup_keyboard()
-    if old_term is not None:
+    if old_term == "thread":
+        log.info("Keyboard input enabled (press Enter to simulate button)")
+    elif old_term is not None:
         log.info("Keyboard input enabled (spacebar = button press)")
 
     atexit.register(cleanup_gpio)
