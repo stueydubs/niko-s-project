@@ -55,3 +55,31 @@ TRACK_CONFIG = [
     {"file": "29.mp3", "silence_min": 15, "silence_max": 20},
     {"file": "30.mp3", "silence_min": 19, "silence_max": 24},
 ]
+
+
+def setup_logging():
+    logger = logging.getLogger("conch")
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=2)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
+                                           datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(handler)
+    return logger
+
+
+def load_track_index():
+    try:
+        with open(STATE_FILE, "r") as f:
+            index = int(f.read().strip())
+            if 0 <= index < len(TRACK_CONFIG):
+                return index
+    except (FileNotFoundError, ValueError):
+        pass
+    return 0
+
+
+def save_track_index(index):
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(str(index))
+    os.replace(tmp, STATE_FILE)
