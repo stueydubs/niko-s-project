@@ -187,7 +187,7 @@ def start_ring(log):
     ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
     log.info("Starting ring loop")
     return subprocess.Popen(
-        ["cvlc", "--input-repeat=-1", ring_file],
+        ["cvlc", "--loop", ring_file],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid
     )
@@ -334,3 +334,5 @@ if __name__ == "__main__":
     except Exception as e:
         logging.getLogger("conch").exception("Fatal error: %s", e)
         sys.exit(1)
+    finally:
+        subprocess.run(["killall", "vlc"], stderr=subprocess.DEVNULL)
