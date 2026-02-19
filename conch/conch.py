@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Conch Shell Phone — a time-based audio art installation."""
+# Wiring: Momentary NO switch between GPIO 17 (physical pin 11) and GND (physical pin 9).
+# No external resistor needed — internal pull-up is enabled in software.
 
 import os
 import sys
 import time
 import random
-import signal
 import logging
 import subprocess
 import atexit
