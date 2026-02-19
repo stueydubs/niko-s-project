@@ -108,3 +108,31 @@ def cleanup_gpio():
         GPIO.cleanup()
     except Exception:
         pass
+
+
+def start_ring(log):
+    ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
+    log.info("Starting ring loop")
+    return subprocess.Popen(
+        ["cvlc", "--loop", ring_file],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+
+def stop_ring(proc, log):
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        log.info("Ring stopped")
+
+
+def start_track(track_index, log):
+    track_file = os.path.join(AUDIO_DIR, TRACK_CONFIG[track_index]["file"])
+    log.info("Playing track %s", TRACK_CONFIG[track_index]["file"])
+    return subprocess.Popen(
+        ["cvlc", "--play-and-exit", track_file],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
