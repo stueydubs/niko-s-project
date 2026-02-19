@@ -136,3 +136,74 @@ def start_track(track_index, log):
         ["cvlc", "--play-and-exit", track_file],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
+
+
+def main():
+    global button_pressed
+
+    log = setup_logging()
+    log.info("Conch starting up")
+
+    setup_gpio()
+    atexit.register(cleanup_gpio)
+
+    track_index = load_track_index()
+    log.info("Loaded track index: %d (%s)", track_index, TRACK_CONFIG[track_index]["file"])
+
+    state = "silent"
+    silence_end = 0
+    ring_proc = None
+    track_proc = None
+
+    # Enter initial silence
+    config = TRACK_CONFIG[track_index]
+    silence_sec = random.uniform(config["silence_min"], config["silence_max"]) * 60
+    silence_end = time.time() + silence_sec
+    log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
+
+    while True:
+        if state == "silent":
+            button_pressed = False  # ignore presses during silence
+            if time.time() >= silence_end:
+                state = "ringing"
+                ring_proc = start_ring(log)
+                log.info("Entering RINGING state, next track: %s",
+                         TRACK_CONFIG[track_index]["file"])
+
+        elif state == "ringing":
+            if button_pressed:
+                button_pressed = False
+                log.info("Button pressed during RINGING")
+                stop_ring(ring_proc, log)
+                ring_proc = None
+                state = "playing"
+                track_proc = start_track(track_index, log)
+                log.info("Entering PLAYING state")
+
+        elif state == "playing":
+            button_pressed = False  # ignore presses during playback
+            if track_proc and track_proc.poll() is not None:
+                log.info("Track %s finished", TRACK_CONFIG[track_index]["file"])
+                track_proc = None
+                track_index = (track_index + 1) % len(TRACK_CONFIG)
+                save_track_index(track_index)
+                log.info("Advanced to track index %d (%s)",
+                         track_index, TRACK_CONFIG[track_index]["file"])
+                config = TRACK_CONFIG[track_index]
+                silence_sec = random.uniform(config["silence_min"],
+                                             config["silence_max"]) * 60
+                silence_end = time.time() + silence_sec
+                state = "silent"
+                log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
+
+        time.sleep(POLL_INTERVAL)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.getLogger("conch").info("Shutdown requested (KeyboardInterrupt)")
+    except Exception as e:
+        logging.getLogger("conch").exception("Fatal error: %s", e)
+        sys.exit(1)
