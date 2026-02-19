@@ -83,3 +83,28 @@ def save_track_index(index):
     with open(tmp, "w") as f:
         f.write(str(index))
     os.replace(tmp, STATE_FILE)
+
+
+button_pressed = False
+
+
+def on_button_press(channel):
+    global button_pressed
+    button_pressed = True
+
+
+def setup_gpio():
+    import RPi.GPIO as GPIO
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.add_event_detect(BUTTON_PIN, GPIO.FALLING,
+                          callback=on_button_press, bouncetime=300)
+
+
+def cleanup_gpio():
+    try:
+        import RPi.GPIO as GPIO
+        GPIO.cleanup()
+    except Exception:
+        pass
