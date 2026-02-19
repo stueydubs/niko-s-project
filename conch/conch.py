@@ -188,17 +188,24 @@ def start_ring(log):
     log.info("Starting ring loop")
     return subprocess.Popen(
         ["cvlc", "--input-repeat=-1", ring_file],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        preexec_fn=os.setsid
     )
 
 
 def stop_ring(proc, log):
     if proc and proc.poll() is None:
-        proc.terminate()
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except OSError:
+            proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except OSError:
+                proc.kill()
         log.info("Ring stopped")
 
 
@@ -207,7 +214,8 @@ def start_track(track_index, log):
     log.info("Playing track %s", TRACK_CONFIG[track_index]["file"])
     return subprocess.Popen(
         ["cvlc", "--play-and-exit", track_file],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        preexec_fn=os.setsid
     )
 
 
@@ -303,11 +311,17 @@ def main():
     finally:
         stop_ring(ring_proc, log)
         if track_proc and track_proc.poll() is None:
-            track_proc.terminate()
+            try:
+                os.killpg(os.getpgid(track_proc.pid), signal.SIGTERM)
+            except OSError:
+                track_proc.terminate()
             try:
                 track_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                track_proc.kill()
+                try:
+                    os.killpg(os.getpgid(track_proc.pid), signal.SIGKILL)
+                except OSError:
+                    track_proc.kill()
         cleanup_keyboard(old_term)
         cleanup_gpio()
 
