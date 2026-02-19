@@ -276,7 +276,13 @@ def main():
                     log.info("Entering PLAYING state")
 
             elif state == "playing":
-                button_pressed = False  # ignore presses during playback
+                if button_pressed:
+                    button_pressed = False
+                    log.info("Button pressed during PLAYING, stopping track")
+                    if track_proc and track_proc.poll() is None:
+                        track_proc.terminate()
+                        track_proc.wait()
+                    subprocess.run(["killall", "-9", "vlc"], stderr=subprocess.DEVNULL)
                 exit_code = track_proc.poll() if track_proc else None
                 if exit_code is not None:
                     if exit_code != 0:
