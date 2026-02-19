@@ -6,6 +6,7 @@
 import os
 import sys
 import time
+import select
 import signal
 import random
 import logging
@@ -131,6 +132,34 @@ def cleanup_gpio():
         pass
 
 
+def setup_keyboard():
+    if not sys.stdin.isatty():
+        return None
+    import tty, termios
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin.fileno())
+    return old_settings
+
+
+def check_keyboard():
+    global button_pressed
+    if not sys.stdin.isatty():
+        return
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    if ready:
+        ch = sys.stdin.read(1)
+        if ch == " ":
+            button_pressed = True
+        elif ch == "\x03":  # Ctrl+C
+            raise KeyboardInterrupt
+
+
+def cleanup_keyboard(old_settings):
+    if old_settings is not None:
+        import termios
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+
 def start_ring(log):
     ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
     log.info("Starting ring loop")
@@ -170,7 +199,15 @@ def main():
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, handle_sigterm)
 
-    setup_gpio()
+    try:
+        setup_gpio()
+    except Exception:
+        log.warning("GPIO not available, using keyboard input only")
+
+    old_term = setup_keyboard()
+    if old_term is not None:
+        log.info("Keyboard input enabled (spacebar = button press)")
+
     atexit.register(cleanup_gpio)
 
     validate_audio_files(log)
@@ -231,12 +268,14 @@ def main():
                     state = "silent"
                     log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
 
+            check_keyboard()
             time.sleep(POLL_INTERVAL)
     finally:
         if ring_proc and ring_proc.poll() is None:
             ring_proc.terminate()
         if track_proc and track_proc.poll() is None:
             track_proc.terminate()
+        cleanup_keyboard(old_term)
         cleanup_gpio()
 
 
