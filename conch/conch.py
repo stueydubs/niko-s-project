@@ -6,6 +6,7 @@
 import os
 import sys
 import time
+import signal
 import random
 import logging
 import subprocess
@@ -69,12 +70,18 @@ def setup_logging():
 
 
 def load_track_index():
+    tmp = STATE_FILE + ".tmp"
+    if os.path.exists(tmp):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
     try:
         with open(STATE_FILE, "r") as f:
             index = int(f.read().strip())
             if 0 <= index < len(TRACK_CONFIG):
                 return index
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, ValueError, OSError):
         pass
     return 0
 
@@ -83,7 +90,20 @@ def save_track_index(index):
     tmp = STATE_FILE + ".tmp"
     with open(tmp, "w") as f:
         f.write(str(index))
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, STATE_FILE)
+
+
+def validate_audio_files(log):
+    ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
+    if not os.path.isfile(ring_file):
+        log.error("MISSING: %s", ring_file)
+        sys.exit(1)
+    for entry in TRACK_CONFIG:
+        track_file = os.path.join(AUDIO_DIR, entry["file"])
+        if not os.path.isfile(track_file):
+            log.warning("MISSING: %s (will be skipped if reached)", track_file)
 
 
 button_pressed = False
@@ -115,7 +135,7 @@ def start_ring(log):
     ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
     log.info("Starting ring loop")
     return subprocess.Popen(
-        ["cvlc", "--loop", ring_file],
+        ["cvlc", "--input-repeat=-1", ring_file],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
@@ -145,8 +165,15 @@ def main():
     log = setup_logging()
     log.info("Conch starting up")
 
+    def handle_sigterm(signum, frame):
+        log.info("Received SIGTERM, shutting down")
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
     setup_gpio()
     atexit.register(cleanup_gpio)
+
+    validate_audio_files(log)
 
     track_index = load_track_index()
     log.info("Loaded track index: %d (%s)", track_index, TRACK_CONFIG[track_index]["file"])
@@ -162,49 +189,62 @@ def main():
     silence_end = time.time() + silence_sec
     log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
 
-    while True:
-        if state == "silent":
-            button_pressed = False  # ignore presses during silence
-            if time.time() >= silence_end:
-                state = "ringing"
-                ring_proc = start_ring(log)
-                log.info("Entering RINGING state, next track: %s",
-                         TRACK_CONFIG[track_index]["file"])
+    try:
+        while True:
+            if state == "silent":
+                button_pressed = False  # ignore presses during silence
+                if time.time() >= silence_end:
+                    state = "ringing"
+                    ring_proc = start_ring(log)
+                    log.info("Entering RINGING state, next track: %s",
+                             TRACK_CONFIG[track_index]["file"])
 
-        elif state == "ringing":
-            if button_pressed:
-                button_pressed = False
-                log.info("Button pressed during RINGING")
-                stop_ring(ring_proc, log)
-                ring_proc = None
-                state = "playing"
-                track_proc = start_track(track_index, log)
-                log.info("Entering PLAYING state")
+            elif state == "ringing":
+                if ring_proc and ring_proc.poll() is not None:
+                    log.warning("Ring process died unexpectedly, restarting ring")
+                    ring_proc = start_ring(log)
+                if button_pressed:
+                    button_pressed = False
+                    log.info("Button pressed during RINGING")
+                    stop_ring(ring_proc, log)
+                    ring_proc = None
+                    state = "playing"
+                    track_proc = start_track(track_index, log)
+                    log.info("Entering PLAYING state")
 
-        elif state == "playing":
-            button_pressed = False  # ignore presses during playback
-            if track_proc and track_proc.poll() is not None:
-                log.info("Track %s finished", TRACK_CONFIG[track_index]["file"])
-                track_proc = None
-                track_index = (track_index + 1) % len(TRACK_CONFIG)
-                save_track_index(track_index)
-                log.info("Advanced to track index %d (%s)",
-                         track_index, TRACK_CONFIG[track_index]["file"])
-                config = TRACK_CONFIG[track_index]
-                silence_sec = random.uniform(config["silence_min"],
-                                             config["silence_max"]) * 60
-                silence_end = time.time() + silence_sec
-                state = "silent"
-                log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
+            elif state == "playing":
+                button_pressed = False  # ignore presses during playback
+                if track_proc and track_proc.poll() is not None:
+                    log.info("Track %s finished", TRACK_CONFIG[track_index]["file"])
+                    track_proc = None
+                    track_index = (track_index + 1) % len(TRACK_CONFIG)
+                    try:
+                        save_track_index(track_index)
+                    except OSError:
+                        log.error("Failed to save track index %d", track_index)
+                    log.info("Advanced to track index %d (%s)",
+                             track_index, TRACK_CONFIG[track_index]["file"])
+                    config = TRACK_CONFIG[track_index]
+                    silence_sec = random.uniform(config["silence_min"],
+                                                 config["silence_max"]) * 60
+                    silence_end = time.time() + silence_sec
+                    state = "silent"
+                    log.info("Entering SILENT state (%.1f minutes)", silence_sec / 60)
 
-        time.sleep(POLL_INTERVAL)
+            time.sleep(POLL_INTERVAL)
+    finally:
+        if ring_proc and ring_proc.poll() is None:
+            ring_proc.terminate()
+        if track_proc and track_proc.poll() is None:
+            track_proc.terminate()
+        cleanup_gpio()
 
 
 if __name__ == "__main__":
     try:
         main()
-    except KeyboardInterrupt:
-        logging.getLogger("conch").info("Shutdown requested (KeyboardInterrupt)")
+    except (KeyboardInterrupt, SystemExit):
+        logging.getLogger("conch").info("Shutdown requested")
     except Exception as e:
         logging.getLogger("conch").exception("Fatal error: %s", e)
         sys.exit(1)

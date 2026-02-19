@@ -1,6 +1,6 @@
 [Unit]
 Description=Conch Shell Phone
-After=sound.target multi-user.target
+After=multi-user.target
 
 [Service]
 Type=simple
@@ -9,8 +9,10 @@ WorkingDirectory=/home/pi/conch
 ExecStart=/usr/bin/python3 /home/pi/conch/conch.py
 Restart=always
 RestartSec=5
-StandardOutput=null
-StandardError=null
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
