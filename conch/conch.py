@@ -6,6 +6,7 @@
 import os
 import sys
 import time
+import shutil
 import select
 import signal
 import random
@@ -97,6 +98,9 @@ def save_track_index(index):
 
 
 def validate_audio_files(log):
+    if shutil.which("cvlc") is None:
+        log.error("cvlc not found — install VLC (sudo apt install vlc-nox)")
+        sys.exit(1)
     ring_file = os.path.join(AUDIO_DIR, "ring.mp3")
     if not os.path.isfile(ring_file):
         log.error("MISSING: %s", ring_file)
@@ -251,8 +255,13 @@ def main():
 
             elif state == "playing":
                 button_pressed = False  # ignore presses during playback
-                if track_proc and track_proc.poll() is not None:
-                    log.info("Track %s finished", TRACK_CONFIG[track_index]["file"])
+                exit_code = track_proc.poll() if track_proc else None
+                if exit_code is not None:
+                    if exit_code != 0:
+                        log.warning("Track %s exited with code %d (playback may have failed)",
+                                    TRACK_CONFIG[track_index]["file"], exit_code)
+                    else:
+                        log.info("Track %s finished", TRACK_CONFIG[track_index]["file"])
                     track_proc = None
                     track_index = (track_index + 1) % len(TRACK_CONFIG)
                     try:
@@ -271,10 +280,13 @@ def main():
             check_keyboard()
             time.sleep(POLL_INTERVAL)
     finally:
-        if ring_proc and ring_proc.poll() is None:
-            ring_proc.terminate()
+        stop_ring(ring_proc, log)
         if track_proc and track_proc.poll() is None:
             track_proc.terminate()
+            try:
+                track_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                track_proc.kill()
         cleanup_keyboard(old_term)
         cleanup_gpio()
 

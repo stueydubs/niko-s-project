@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CURRENT_USER="$(whoami)"
+CURRENT_USER="${SUDO_USER:-$(whoami)}"
 
 echo "Installing Conch Shell Phone..."
 
